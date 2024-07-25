@@ -60,6 +60,19 @@
   If the payload is present, the Content-Length header is used to determine the
   size.
 */
+
+struct HTTPRangeRequest {
+  long start;
+  long end;
+  char range_type[30];
+};
+
+struct HTTPRangeResponse {
+  long start;
+  long end;
+  long total_length;
+};
+
 struct HTTPRequest {
   // Method details
   char method[30];   // "GET" or "POST"
@@ -67,10 +80,12 @@ struct HTTPRequest {
   char protocol[30]; // "HTTP/1.1"
 
   // Headers
-  char host_hdr[30];          // "localhost:8082"
-  char authorization_hdr[30]; // <secret>
-  char content_type_hdr[30];  // "application/json"
-  long content_length_hdr;    // 38 (used for POST request)
+  char host_hdr[30];                 // "localhost:8082"
+  char authorization_hdr[30];        // <secret>
+  char content_type_hdr[30];         // "application/json"
+  long content_length_hdr;           // 38 (used for POST request)
+  char range_hdr_raw[30];            // "0-100" (used for range request)
+  struct HTTPRangeRequest range_hdr; // 0-100 (used for range request)
 
   // Payload
   char payload[BUFFER_SIZE]; // { "title":"foo","body":"bar", "id": 1}
@@ -82,9 +97,10 @@ struct HTTPResponse {
   char status_message[30]; // "OK"
 
   // Headers
-  char content_type_hdr[30];  // "application/json"
-  char accept_ranges_hdr[30]; // "bytes"
-  long content_length_hdr;    // 38 (sent back in GET response)
+  char content_type_hdr[30];          // "application/json"
+  char accept_ranges_hdr[30];         // "bytes"
+  long content_length_hdr;            // 38 (sent back in GET response)
+  struct HTTPRangeResponse range_hdr; // 0-100 (used for range request)
 
   // Payload
   char payload[BUFFER_SIZE]; // { "title":"foo","body":"bar", "id": 1}
@@ -106,7 +122,9 @@ void printHTTPRequest(struct HTTPRequest *request) {
   printf("Authorization Header: %s\n", request->authorization_hdr);
   printf("Content-Type Header: %s\n", request->content_type_hdr);
   printf("Content-Length Header: %ld\n", request->content_length_hdr);
+  printf("Range: %ld - %ld\n", request->range_hdr.start, request->range_hdr.end);
   printf("Payload: %s\n", request->payload);
+
 }
 
 void printHTTPResponse(struct HTTPResponse *http_response) {
@@ -224,6 +242,21 @@ long construct_http_response_string(struct HTTPResponse *http_response,
   return response_length;
 }
 
+struct HTTPRangeRequest *parse_http_range_request_hdr(char *range_hdr) {
+  struct HTTPRangeRequest *range_request = malloc(sizeof(struct HTTPRangeRequest));
+  char *range = malloc(strlen(range_hdr) * sizeof(char));
+  strcpy(range, range_hdr);
+  char *range_type = strtok(range, "=");
+  char *range_start = strtok(NULL, "-");
+  char *range_end = strtok(NULL, "");
+
+  range_request->start = atoi(range_start);
+  range_request->end = atoi(range_end);
+  strcpy(range_request->range_type, range_type);
+
+  return range_request;
+}
+
 // Parse the raw HTTP request and populate the HTTPRequest struct
 void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
   char *method, *uri, *prot, *payload;
@@ -263,6 +296,8 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
       strcpy(http_request->content_type_hdr, value);
     } else if (strcasecmp(key, CONTENT_LENGTH_HEADER) == 0) {
       http_request->content_length_hdr = atoi(value);
+    } else if (strcasecmp(key, "Range") == 0) {
+      strcpy(http_request->range_hdr_raw, value);
     }
 
     // we want to keep checking if the next line after header is \r\n which
@@ -280,6 +315,14 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
   // pointer that much forward
   payload_body = payload_body + 3;
   strcpy(http_request->payload, payload_body);
+
+  // TODO: Maybe strtok_r can be used to make this function reentrant?
+  // Since strtok is not a reentrant function, we weren't able to parse the range
+  // header in the same loop. Hence, we parse it here
+  if (strlen(http_request->range_hdr_raw) > 0) {
+    http_request->range_hdr = *parse_http_range_request_hdr(http_request->range_hdr_raw);
+    printf("Range: %ld - %ld\n", http_request->range_hdr.start, http_request->range_hdr.end);
+  }
 }
 
 int process_head_http_request(struct HTTPRequest *http_request,
