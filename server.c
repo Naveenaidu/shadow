@@ -221,7 +221,7 @@ void generate_http_response(int code, struct HTTPResponse *http_response) {
 
 /*  ---------------- util function ------------------------------*/
 
-long construct_http_response_string(struct HTTPResponse *http_response,
+long construct_http_response_string(struct HTTPResponse *http_response, struct HTTPRequest *http_request,
                                     char *response_string) {
 
   if (response_string == NULL) {
@@ -267,10 +267,13 @@ long construct_http_response_string(struct HTTPResponse *http_response,
 
   long response_length = strlen(response_string);
 
-  for (long i = 0; i < http_response->content_length_hdr; i++) {
+  // Add the payload only when the method is GET
+  if (strcasecmp(http_request->method, "GET") == 0)
+    for (long i = 0; i < http_response->content_length_hdr; i++) {
     response_string[response_length] = (unsigned char)http_response->payload[i];
     response_length++;
   }
+  
 
   return response_length;
 }
@@ -473,11 +476,11 @@ void process_http_request(struct HTTPRequest *http_request,
   return;
 }
 
-void send_http_request(int client_fd, struct HTTPResponse *http_response) {
+void send_http_request(int client_fd, struct HTTPResponse *http_response, struct HTTPRequest *http_request) {
   // Allocate a buffer for the response string
   char *response_string = malloc(BUFFER_SIZE); // Adjust size as needed
   long total_response_bytes =
-      construct_http_response_string(http_response, response_string);
+      construct_http_response_string(http_response, http_request, response_string);
   long bytes_sent = send(client_fd, response_string, total_response_bytes, 0);
 
   if (bytes_sent < 0) {
@@ -524,7 +527,7 @@ void handle_client_request(int client_fd) {
   printHTTPRequest(http_request);
   process_http_request(http_request, http_response);
   printHTTPResponse(http_response);
-  send_http_request(client_fd, http_response);
+  send_http_request(client_fd, http_response, http_request);
   printf("\nResponse sent\n");
   printf("-------------------------------\n\n");
 
