@@ -7,3 +7,14 @@ Youtube video about building media player: https://youtu.be/f8EGZa32Mts?si=oiKKX
 
 recv, how to properly read the HTTP request
 https://stackoverflow.com/questions/49821687/how-to-determine-if-i-received-entire-message-from-recv-calls
+
+
+http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png
+
+curl http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png t -H "Authorization: as"
+
+curl http://localhost:8082/tmp/upload_test t -H "Authorization: as"
+
+curl http://localhost:8082/tmp/upload_test t -H "Authorization: as" > upload_test_1
+
+dd if=/dev/urandom of=upload_test bs=1M count=1000

@@ -15,7 +15,8 @@
 
 // todo: take this as an argument
 #define PORT 8082
-#define BUFFER_SIZE 104857600 // 100 MiB
+// #define BUFFER_SIZE 104857600 // 100 MiB
+# define BUFFER_SIZE 16106127360 // 15 GiB
 
 // Header constansts
 #define HOST_HEADER "HOST"
@@ -85,6 +86,11 @@ struct HTTPResponse {
   char payload[BUFFER_SIZE]; // { "title":"foo","body":"bar", "id": 1}
 };
 
+struct HTTPResponseMetadata {
+  char *response_string;
+  long response_length;
+};
+
 void printHTTPRequest(struct HTTPRequest *request) {
   printf("-------------- HTTP Request -----------\n");
   printf("Method: %s\n", request->method);
@@ -109,9 +115,8 @@ void printHTTPResponse(struct HTTPResponse *http_response) {
   printf("-------------------------------\n");
 }
 
-char *construct_http_response_string(struct HTTPResponse *http_response) {
-  // Allocate a buffer for the response string
-  char *response_string = malloc(BUFFER_SIZE); // Adjust size as needed
+long construct_http_response_string(struct HTTPResponse *http_response, char *response_string ) {
+  
   if (response_string == NULL) {
     perror("Failed to allocate memory");
     exit(EXIT_FAILURE);
@@ -125,12 +130,12 @@ char *construct_http_response_string(struct HTTPResponse *http_response) {
           http_response->status_code, http_response->status_message);
 
   // Add headers if they are not empty
-  if (http_response->content_length_hdr > 0) {
+
     char content_length[64];
     sprintf(content_length, "Content-Length: %ld\r\n",
             http_response->content_length_hdr);
     strcat(response_string, content_length);
-  }
+  
   if (strlen(http_response->accept_ranges_hdr) > 0) {
     strcat(response_string, "Accept-Ranges: ");
     strcat(response_string, http_response->accept_ranges_hdr);
@@ -145,12 +150,27 @@ char *construct_http_response_string(struct HTTPResponse *http_response) {
   // End headers section
   strcat(response_string, "\r\n");
 
-  // Add payload if it is not empty
-  if (strlen(http_response->payload) > 0) {
-    strcat(response_string, http_response->payload);
+  long counter = strlen(response_string);
+  printf("Response length before adding buffer %ld\n", counter);
+
+  
+  for (long i = 0; i < http_response->content_length_hdr; i++) {
+    // printf("%02x ", (unsigned char)http_response->payload[i]);
+    response_string[counter] = (unsigned char)http_response->payload[i];
+    counter++;
   }
 
-  return response_string;
+  printf("Response length after adding buffer %ld\n", counter);
+
+
+  // Add payload if it is not empty
+  // if (strlen(http_response->payload) > 0) {
+  //   strcat(response_string, http_response->payload);
+  // }
+
+
+
+  return counter;
 }
 
 // Parse the raw HTTP request and populate the HTTPRequest struct
@@ -214,6 +234,7 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
 long get_file_length(char *file_name) {
   FILE *fp = fopen(file_name, "r");
   if (fp == NULL) {
+    printf("--- file not found 1\n");
     return FILE_NOT_FOUND;
   }
   int file_descriptor = fileno(fp);
@@ -230,11 +251,11 @@ long get_file_length(char *file_name) {
   return file_stat.st_size;
 }
 
-size_t get_file_content(char *file_name, char *buffer, long file_size) {
+size_t get_file_content(char *file_name, unsigned char *buffer, long file_size) {
   FILE *fp = fopen(file_name, "rb");
   if (fp == NULL) {
-    perror("error opening file");
-    exit(EXIT_FAILURE);
+    printf("--- file not found\n");
+    return FILE_NOT_FOUND;
   }
   size_t bytes_read = fread(buffer, 1, file_size, fp);
   // The total bytes read should be same as the file size
@@ -244,7 +265,8 @@ size_t get_file_content(char *file_name, char *buffer, long file_size) {
   }
   printf("file size: %ld\n", file_size);
   printf("Bytes read: %ld\n", bytes_read);
-  printf("Buffer: %u\n", buffer);
+  printf("Buffer: %s\n", buffer);
+
   fclose(fp);
   return bytes_read;
 }
@@ -272,26 +294,34 @@ void process_head_http_request(struct HTTPRequest *http_request,
 
 void proccess_get_http_request(struct HTTPRequest *http_request,
                                struct HTTPResponse *http_response) {
+
+  strcpy(http_response->protocol, http_request->protocol);
+
   // Read the file length. Store it in content length. If file not found return
   // 404
   long file_length = get_file_length(http_request->uri);
   if (file_length == FILE_NOT_FOUND) {
     http_response->status_code = 404;
     strcpy(http_response->status_message, "Not Found");
+    return;
   } else {
     http_response->content_length_hdr = file_length;
     http_response->status_code = 200;
     strcpy(http_response->status_message, "OK");
   }
 
-  strcpy(http_response->protocol, http_request->protocol);
+  
   strcpy(http_response->content_type_hdr, "application/octet-stream");
 
   // Read the file content and store it in the payload
-  char *file_content = malloc(file_length * sizeof(char));
+  unsigned char *file_content = malloc(file_length * sizeof(char));
   size_t bytes_read = get_file_content(http_request->uri, file_content, file_length);
+
   file_content[bytes_read] = '\0';
-  strcpy(http_response->payload, file_content);
+
+  printf("Bytes read from file: %ld\n", bytes_read);
+  memcpy(http_response->payload, file_content, bytes_read);
+  // strcpy(http_response->payload, file_content);
 
 }
 
@@ -315,8 +345,15 @@ void process_http_request(struct HTTPRequest *http_request,
 }
 
 void send_http_request(int client_fd, struct HTTPResponse *http_response) {
-  char *response_string = construct_http_response_string(http_response);
-  int bytes_sent = send(client_fd, response_string, strlen(response_string), 0);
+  // Allocate a buffer for the response string
+  char *response_string = malloc(BUFFER_SIZE); // Adjust size as needed
+  long total_response_bytes = construct_http_response_string(http_response, response_string);
+
+  printf("\n Response string: %s\n", response_string);
+
+  long bytes_sent = send(client_fd, response_string, total_response_bytes, 0);
+  printf("\n Response string length: %ld\n", strlen(response_string));
+  printf("\n Bytes sent: %ld\n", bytes_sent);
   if (bytes_sent < 0) {
     perror("error sending data to client");
     exit(EXIT_FAILURE);
@@ -362,7 +399,7 @@ void handle_client_request(int client_fd) {
   process_http_request(http_request, http_response);
   printHTTPResponse(http_response);
   send_http_request(client_fd, http_response);
-  printf("Response sent\n");
+  printf("\nResponse sent\n");
 
   return;
 }
