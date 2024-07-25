@@ -62,3 +62,16 @@ curl http://localhost:8082/tmp/upload_test  -H "Authorization: as" -H "Range: by
 curl http://localhost:8082/tmp/upload_test  -H "Authorization: as" -H "Range: bytes=100000001-200000000" >> upload_test_1
 curl http://localhost:8082/tmp/upload_test  -H "Authorization: as" -H "Range: bytes=200000001-300000000" >> upload_test_1
 cmp upload_test upload_test_1
+
+-------------------
+
+Actual file test (Test PNG)
+
+cd /home/theprophet/Pictures/Screenshots
+curl -v -I http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png
+
+rm -rf upload_test_1.png
+curl  http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png -H "Authorization: as" -H "Range: bytes=0-50000" >> upload_test_1.png
+curl http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png  -H "Authorization: as" -H "Range: bytes=50001-100000" >> upload_test_1.png
+curl http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png  -H "Authorization: as" -H "Range: bytes=100001-150000" >> upload_test_1.png
+cmp test.png upload_test_1.png
