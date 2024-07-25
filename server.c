@@ -5,10 +5,39 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 // todo: take this as an argument
 #define PORT 8082
 #define BUFFER_SIZE 104857600 // 100 MiB
+
+struct HTTPRequest{
+  // Method details
+  char method[4];
+  char uri[25];
+  char protocol[10];
+
+  // Headers
+  char host_hdr[20];
+  char authorization_hdr[20];
+  char content_type_hdr[20];
+  int content_length_hdr;
+
+  // Payload
+  char paylod[BUFFER_SIZE];
+};
+
+struct HTTPResponse{
+  char protocol[10];
+  int status_code;
+  int status_message;
+
+  // Headers
+  char content_type_hdr[20];
+
+  // Payload
+  char paylod[BUFFER_SIZE];
+};
 
 int main(int argc, char *argv[]) {
 
@@ -66,43 +95,124 @@ int main(int argc, char *argv[]) {
     socklen_t client_addr_len = sizeof(client_addr);
 
     // accept client connection
-    client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-  
+    client_fd =
+        accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+    printf("Client socket %d\n", client_fd);
+
     if (client_fd < 0) {
       perror("bind failed");
       exit(EXIT_FAILURE);
     }
 
-    //Read from the socket
+    // Read from the socket
     //
-    // FIXME: In our current POC - we assume that the request and response would
-    // at max be 100MB. So we just maintain a buffer of that size and assume
-    // that we receive the entire request/response in a single recv and we do
-    // not get any additional data. 
-    // Assumption: whenever recv returns something, it is encapsulates the
-    // entire request/response 
+    //  FIXME: In our current POC - we assume that the request and response
+    //  would at max be 100MB. So we just maintain a buffer of that size and
+    //  assume that we receive the entire request/response in a single recv and
+    //  we do not get any additional data. Assumption: whenever recv returns
+    //  something, it is encapsulates the entire request/response
     //
-    // See
-    // https://stackoverflow.com/questions/49821687/how-to-determine-if-i-received-entire-message-from-recv-calls
-    // for properly reading from recv.
-    
+    //  See
+    //  https://stackoverflow.com/questions/49821687/how-to-determine-if-i-received-entire-message-from-recv-calls
+    //  for properly reading from recv.
+
     int bytes_recvd;
     char *buffer = (char *)malloc(BUFFER_SIZE * sizeof(char));
+    // FIXME:
     bytes_recvd = recv(client_fd, buffer, BUFFER_SIZE, 0);
-    
-    if (bytes_recvd < 0){
+
+    if (bytes_recvd < 0) {
       perror("error reading data from socket");
       exit(EXIT_FAILURE);
     }
 
-    if (bytes_recvd == 0){
+    if (bytes_recvd == 0) {
       perror("client disconnected upexpectedly");
       exit(EXIT_FAILURE);
     }
 
-    printf("Bytes received: %d\n", bytes_recvd);
-    printf("Request fetched: %s\n", buffer);
+    // Add a null terminator to know that we have reached the end of the HTTP
+    // request
+    buffer[bytes_recvd] = '\0';
 
+    printf("Bytes received: %d\n", bytes_recvd);
+    printf("\n-------- Request fetched --------\n");
+    printf("%s\n", buffer);
+
+    /*
+      GET /test HTTP/1.1\r\n
+      Host: localhost:8082\r\n
+      User-Agent: curl/7.81.0\r\n
+      Accept: *\/*\r\n
+      Authorization: as \r\n
+      \r\n
+
+
+      // Use Content-Length to figure out how big the payload is
+      POST /path HTTP/1.0\r\n
+      Content-Type: text/plain\r\n
+      Content-Length: 12\r\n
+      \r\n
+      query_string
+
+      // Response
+      HTTP/1.1 200 OK\r\n
+      Access-Control-Allow-Origin: *\r\n
+      Server: abc\r\n
+      Content-Length: 200\r\n
+      \r\n
+      body
+    */
+
+    // Parse the bytes received
+    // 1. Split the line at \r\n
+    // 2. If it turns out to be a GET request, no need for body
+    // 3. If response contains Content-length then you need to read the body
+
+    // TODO: Put all of this in struct
+    char *method, // "GET" or "POST"
+        *uri,     // "/index.html" things before '?'
+        *prot;    // "HTTP/1.1"
+
+    char *payload; // for POST
+    int payload_size;
+
+    printf("--- test ---\n");
+
+    method = strtok(buffer, " ");
+    puts(method);
+    uri = strtok(NULL, " ");
+    puts(uri);
+    prot = strtok(NULL, " \r\n");
+    puts(prot);
+
+    bool headers_done = false;
+    char *payload_body;
+
+    printf("---------- HEADERS ----------\n");
+    while (!headers_done){
+      char *key, *value, *next;
+      key = strtok(NULL, "\r\n: \t");
+      value = strtok(NULL, "\r\n"); while(*value && *value==' ') value++;
+      printf("Key: %s, Value: %s\n", key, value);
+
+      // we want to keep checking if the next line after header is \r\n. Which
+      // indicated the end of headers and start of body
+      next = value + strlen(value) + 2;
+      if(next[0] == '\r' && next[1] == '\n'){
+        printf("payload beginning %c\n", next[5]);
+        payload_body = next;
+        headers_done = true;
+      }
+    }
+
+  payload_body = strtok(NULL, "\0");
+  // The headers and payload body is seperated by "\r\n\r\n", hence move the
+  // pointer that much forward
+  payload_body = payload_body + 3;
+  printf("---------- payload body ----------\n");
+  printf("%s\n", payload_body);
+  printf("---- done ----\n");
 
   }
 
@@ -113,3 +223,4 @@ int main(int argc, char *argv[]) {
   printf("Hello, World!");
   return 0;
 }
+
