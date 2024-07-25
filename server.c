@@ -1,17 +1,23 @@
 #include <asm-generic/socket.h>
 #include <netinet/in.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <stdbool.h>
 
 // todo: take this as an argument
 #define PORT 8082
 #define BUFFER_SIZE 104857600 // 100 MiB
 
-struct HTTPRequest{
+// Header constansts
+#define HOST_HEADER "HOST"
+#define AUTHORIZATION_HEADER "Authorization"
+#define CONTENT_TYPE_HEADER "Content-Type"
+#define CONTENT_LENGTH_HEADER "Content-Length"
+
+struct HTTPRequest {
   // Method details
   char method[4];
   char uri[25];
@@ -27,7 +33,7 @@ struct HTTPRequest{
   char paylod[BUFFER_SIZE];
 };
 
-struct HTTPResponse{
+struct HTTPResponse {
   char protocol[10];
   int status_code;
   int status_message;
@@ -38,6 +44,19 @@ struct HTTPResponse{
   // Payload
   char paylod[BUFFER_SIZE];
 };
+
+void printHTTPRequest(struct HTTPRequest *request) {
+  printf("-------------- HTTP Request -----------\n");
+  printf("Method: %s\n", request->method);
+  printf("URI: %s\n", request->uri);
+  printf("Protocol: %s\n", request->protocol);
+  printf("Host Header: %s\n", request->host_hdr);
+  printf("Authorization Header: %s\n", request->authorization_hdr);
+  printf("Content-Type Header: %s\n", request->content_type_hdr);
+  printf("Content-Length Header: %d\n", request->content_length_hdr);
+  printf("Payload: %s\n", request->paylod);
+  printf("-------------------------------\n");
+}
 
 int main(int argc, char *argv[]) {
 
@@ -179,41 +198,65 @@ int main(int argc, char *argv[]) {
 
     printf("--- test ---\n");
 
+    struct HTTPRequest *http_request = malloc(sizeof(struct HTTPRequest));
+
     method = strtok(buffer, " ");
     puts(method);
     uri = strtok(NULL, " ");
+    uri = uri + 1; // remove the leading '/'
     puts(uri);
     prot = strtok(NULL, " \r\n");
     puts(prot);
+
+    strcpy(http_request->method, method);
+    strcpy(http_request->uri, uri);
+    strcpy(http_request->protocol, prot);
+
+    
 
     bool headers_done = false;
     char *payload_body;
 
     printf("---------- HEADERS ----------\n");
-    while (!headers_done){
+    while (!headers_done) {
       char *key, *value, *next;
       key = strtok(NULL, "\r\n: \t");
-      value = strtok(NULL, "\r\n"); while(*value && *value==' ') value++;
+      value = strtok(NULL, "\r\n");
+      while (*value && *value == ' ')
+        value++;
       printf("Key: %s, Value: %s\n", key, value);
+
+      if (strcasecmp(key, HOST_HEADER) == 0) {
+        strcpy(http_request->host_hdr, value);
+      } else if (strcasecmp(key, AUTHORIZATION_HEADER) == 0) {
+        strcpy(http_request->authorization_hdr, value);
+      } else if (strcasecmp(key, CONTENT_TYPE_HEADER) == 0) {
+        strcpy(http_request->content_type_hdr, value);
+      } else if (strcasecmp(key, CONTENT_LENGTH_HEADER) == 0) {
+        http_request->content_length_hdr = atoi(value);
+      }
 
       // we want to keep checking if the next line after header is \r\n. Which
       // indicated the end of headers and start of body
       next = value + strlen(value) + 2;
-      if(next[0] == '\r' && next[1] == '\n'){
+      if (next[0] == '\r' && next[1] == '\n') {
         printf("payload beginning %c\n", next[5]);
         payload_body = next;
         headers_done = true;
       }
     }
 
-  payload_body = strtok(NULL, "\0");
-  // The headers and payload body is seperated by "\r\n\r\n", hence move the
-  // pointer that much forward
-  payload_body = payload_body + 3;
-  printf("---------- payload body ----------\n");
-  printf("%s\n", payload_body);
-  printf("---- done ----\n");
+    payload_body = strtok(NULL, "\0");
+    // The headers and payload body is seperated by "\r\n\r\n", hence move the
+    // pointer that much forward
+    payload_body = payload_body + 3;
+    printf("---------- payload body ----------\n");
+    printf("%s\n", payload_body);
+    printf("---- done ----\n");
 
+    strcpy(http_request->paylod, payload_body);
+
+    printHTTPRequest(http_request);
   }
 
   close(client_fd);
@@ -223,4 +266,3 @@ int main(int argc, char *argv[]) {
   printf("Hello, World!");
   return 0;
 }
-
