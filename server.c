@@ -58,7 +58,7 @@
 struct HTTPRequest {
   // Method details
   char method[30];    // "GET" or "POST"
-  char uri[30];      // "/index.html" things before '?' (used for GET request)
+  char uri[200];      // "/index.html" things before '?' (used for GET request)
   char protocol[30]; // "HTTP/1.1"
 
   // Headers
@@ -225,7 +225,28 @@ long get_file_length(char *file_name) {
   // This allows us to get the size of file without opening it
   struct stat file_stat;
   fstat(file_descriptor, &file_stat);
+
+  fclose(fp);
   return file_stat.st_size;
+}
+
+size_t get_file_content(char *file_name, char *buffer, long file_size) {
+  FILE *fp = fopen(file_name, "rb");
+  if (fp == NULL) {
+    perror("error opening file");
+    exit(EXIT_FAILURE);
+  }
+  size_t bytes_read = fread(buffer, 1, file_size, fp);
+  // The total bytes read should be same as the file size
+  if (bytes_read != file_size) {
+    perror("error reading file");
+    exit(EXIT_FAILURE);
+  }
+  printf("file size: %ld\n", file_size);
+  printf("Bytes read: %ld\n", bytes_read);
+  printf("Buffer: %u\n", buffer);
+  fclose(fp);
+  return bytes_read;
 }
 
 void process_head_http_request(struct HTTPRequest *http_request,
@@ -249,13 +270,29 @@ void process_head_http_request(struct HTTPRequest *http_request,
   strcpy(http_response->content_type_hdr, "application/octet-stream");
 }
 
-void send_http_request(int client_fd, struct HTTPResponse *http_response) {
-  char *response_string = construct_http_response_string(http_response);
-  int bytes_sent = send(client_fd, response_string, strlen(response_string), 0);
-  if (bytes_sent < 0) {
-    perror("error sending data to client");
-    exit(EXIT_FAILURE);
+void proccess_get_http_request(struct HTTPRequest *http_request,
+                               struct HTTPResponse *http_response) {
+  // Read the file length. Store it in content length. If file not found return
+  // 404
+  long file_length = get_file_length(http_request->uri);
+  if (file_length == FILE_NOT_FOUND) {
+    http_response->status_code = 404;
+    strcpy(http_response->status_message, "Not Found");
+  } else {
+    http_response->content_length_hdr = file_length;
+    http_response->status_code = 200;
+    strcpy(http_response->status_message, "OK");
   }
+
+  strcpy(http_response->protocol, http_request->protocol);
+  strcpy(http_response->content_type_hdr, "application/octet-stream");
+
+  // Read the file content and store it in the payload
+  char *file_content = malloc(file_length * sizeof(char));
+  size_t bytes_read = get_file_content(http_request->uri, file_content, file_length);
+  file_content[bytes_read] = '\0';
+  strcpy(http_response->payload, file_content);
+
 }
 
 void process_http_request(struct HTTPRequest *http_request,
@@ -264,10 +301,8 @@ void process_http_request(struct HTTPRequest *http_request,
   // 2. If GET, then fetch the file and send it back
   if (strcasecmp(http_request->method, "HEAD") == 0) {
     process_head_http_request(http_request, http_response);
-    char *resp = construct_http_response_string(http_response);
-    printf("Response: %s\n", resp);
   } else if (strcasecmp(http_request->method, "GET") == 0) {
-    // Send back server information
+    proccess_get_http_request(http_request, http_response);
   } else {
     // send error response
   }
@@ -277,6 +312,15 @@ void process_http_request(struct HTTPRequest *http_request,
   // 3. Add it to payload and send
 
   return;
+}
+
+void send_http_request(int client_fd, struct HTTPResponse *http_response) {
+  char *response_string = construct_http_response_string(http_response);
+  int bytes_sent = send(client_fd, response_string, strlen(response_string), 0);
+  if (bytes_sent < 0) {
+    perror("error sending data to client");
+    exit(EXIT_FAILURE);
+  }
 }
 
 // Handle the client request
@@ -316,7 +360,9 @@ void handle_client_request(int client_fd) {
   parse_http_request(buffer, http_request);
   printHTTPRequest(http_request);
   process_http_request(http_request, http_response);
+  printHTTPResponse(http_response);
   send_http_request(client_fd, http_response);
+  printf("Response sent\n");
 
   return;
 }
@@ -324,7 +370,6 @@ void handle_client_request(int client_fd) {
 int main(int argc, char *argv[]) {
 
   int server_fd, client_fd;
-  char buffer[256];
 
   struct sockaddr_in server_addr;
 
