@@ -101,7 +101,7 @@ void printHTTPRequest(struct HTTPRequest *request) {
   printf("Content-Type Header: %s\n", request->content_type_hdr);
   printf("Content-Length Header: %ld\n", request->content_length_hdr);
   printf("Payload: %s\n", request->payload);
-  printf("-------------------------------\n");
+
 }
 
 void printHTTPResponse(struct HTTPResponse *http_response) {
@@ -112,7 +112,6 @@ void printHTTPResponse(struct HTTPResponse *http_response) {
   printf("Accept-Ranges: %s\n", http_response->accept_ranges_hdr);
   printf("Content-Type: %s\n", http_response->content_type_hdr);
   printf("Payload: %s\n", http_response->payload);
-  printf("-------------------------------\n");
 }
 
 long construct_http_response_string(struct HTTPResponse *http_response, char *response_string ) {
@@ -151,23 +150,11 @@ long construct_http_response_string(struct HTTPResponse *http_response, char *re
   strcat(response_string, "\r\n");
 
   long counter = strlen(response_string);
-  printf("Response length before adding buffer %ld\n", counter);
 
-  
   for (long i = 0; i < http_response->content_length_hdr; i++) {
-    // printf("%02x ", (unsigned char)http_response->payload[i]);
     response_string[counter] = (unsigned char)http_response->payload[i];
     counter++;
   }
-
-  printf("Response length after adding buffer %ld\n", counter);
-
-
-  // Add payload if it is not empty
-  // if (strlen(http_response->payload) > 0) {
-  //   strcat(response_string, http_response->payload);
-  // }
-
 
 
   return counter;
@@ -234,7 +221,6 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
 long get_file_length(char *file_name) {
   FILE *fp = fopen(file_name, "r");
   if (fp == NULL) {
-    printf("--- file not found 1\n");
     return FILE_NOT_FOUND;
   }
   int file_descriptor = fileno(fp);
@@ -254,7 +240,6 @@ long get_file_length(char *file_name) {
 size_t get_file_content(char *file_name, unsigned char *buffer, long file_size) {
   FILE *fp = fopen(file_name, "rb");
   if (fp == NULL) {
-    printf("--- file not found\n");
     return FILE_NOT_FOUND;
   }
   size_t bytes_read = fread(buffer, 1, file_size, fp);
@@ -263,9 +248,6 @@ size_t get_file_content(char *file_name, unsigned char *buffer, long file_size) 
     perror("error reading file");
     exit(EXIT_FAILURE);
   }
-  printf("file size: %ld\n", file_size);
-  printf("Bytes read: %ld\n", bytes_read);
-  printf("Buffer: %s\n", buffer);
 
   fclose(fp);
   return bytes_read;
@@ -319,9 +301,7 @@ void proccess_get_http_request(struct HTTPRequest *http_request,
 
   file_content[bytes_read] = '\0';
 
-  printf("Bytes read from file: %ld\n", bytes_read);
   memcpy(http_response->payload, file_content, bytes_read);
-  // strcpy(http_response->payload, file_content);
 
 }
 
@@ -348,12 +328,8 @@ void send_http_request(int client_fd, struct HTTPResponse *http_response) {
   // Allocate a buffer for the response string
   char *response_string = malloc(BUFFER_SIZE); // Adjust size as needed
   long total_response_bytes = construct_http_response_string(http_response, response_string);
-
-  printf("\n Response string: %s\n", response_string);
-
   long bytes_sent = send(client_fd, response_string, total_response_bytes, 0);
-  printf("\n Response string length: %ld\n", strlen(response_string));
-  printf("\n Bytes sent: %ld\n", bytes_sent);
+
   if (bytes_sent < 0) {
     perror("error sending data to client");
     exit(EXIT_FAILURE);
@@ -400,6 +376,7 @@ void handle_client_request(int client_fd) {
   printHTTPResponse(http_response);
   send_http_request(client_fd, http_response);
   printf("\nResponse sent\n");
+  printf("-------------------------------\n\n");
 
   return;
 }
@@ -418,7 +395,6 @@ int main(int argc, char *argv[]) {
     perror("socket failed");
     exit(EXIT_FAILURE);
   }
-  printf("server_fd %d\n", server_fd);
 
   // 2. Configure the socket
   server_addr.sin_family = AF_INET;
