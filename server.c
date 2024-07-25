@@ -16,11 +16,17 @@
 // HTTP Status code
 #define HTTP_OK 200
 #define HTTP_NOT_FOUND 404
+#define HTTP_PARTIAL_CONTENT 206
+#define HTTP_INTERNAL_ERROR 500
 
 // todo: take this as an argument
 #define PORT 8082
-// #define BUFFER_SIZE 104857600 // 100 MiB
-#define BUFFER_SIZE 16106127360 // 15 GiB
+#define BUFFER_SIZE 309715200 // 300 MiB
+
+// NOTE: choose appropriate buffer size, If the amount of data you want to
+// receive/send in HTTP request-response cycle is greater than 200 MiB, then increase.
+// #define BUFFER_SIZE 104857600 // 100 MiB 
+// #define BUFFER_SIZE 16106127360 // 15 GiB
 
 // Header constansts
 #define HOST_HEADER "HOST"
@@ -61,6 +67,7 @@
   size.
 */
 
+// Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests
 struct HTTPRangeRequest {
   long start;
   long end;
@@ -122,9 +129,9 @@ void printHTTPRequest(struct HTTPRequest *request) {
   printf("Authorization Header: %s\n", request->authorization_hdr);
   printf("Content-Type Header: %s\n", request->content_type_hdr);
   printf("Content-Length Header: %ld\n", request->content_length_hdr);
-  printf("Range: %ld - %ld\n", request->range_hdr.start, request->range_hdr.end);
+  printf("Range: %ld - %ld\n", request->range_hdr.start,
+         request->range_hdr.end);
   printf("Payload: %s\n", request->payload);
-
 }
 
 void printHTTPResponse(struct HTTPResponse *http_response) {
@@ -134,6 +141,8 @@ void printHTTPResponse(struct HTTPResponse *http_response) {
   printf("Content-Length: %ld\n", http_response->content_length_hdr);
   printf("Accept-Ranges: %s\n", http_response->accept_ranges_hdr);
   printf("Content-Type: %s\n", http_response->content_type_hdr);
+  printf("Content-Range: %ld-%ld/%ld\n", http_response->range_hdr.start,
+         http_response->range_hdr.end, http_response->range_hdr.total_length);
   printf("Payload: %s\n", http_response->payload);
 }
 
@@ -173,9 +182,32 @@ size_t get_file_content(char *file_name, unsigned char *buffer,
   return bytes_read;
 }
 
-void generate_http_error_response(int error_code,
-                                  struct HTTPResponse *http_response) {
-  switch (error_code) {
+size_t get_file_content_range(char *file_name, unsigned char *buffer,
+                              long start, long range_length) {
+  FILE *fp = fopen(file_name, "rb");
+  if (fp == NULL) {
+    return FILE_NOT_FOUND;
+  }
+  fseek(fp, start, SEEK_SET);
+  size_t bytes_read = fread(buffer, 1, range_length, fp);
+
+  // The total bytes read should be same as the file size
+  fclose(fp);
+  return bytes_read;
+}
+
+void generate_http_response(int code, struct HTTPResponse *http_response) {
+  switch (code) {
+  case HTTP_OK:
+    http_response->status_code = 200;
+    strcpy(http_response->status_message, "OK");
+    strcpy(http_response->content_type_hdr, "application/octet-stream");
+    break;
+  case HTTP_PARTIAL_CONTENT:
+    http_response->status_code = 206;
+    strcpy(http_response->status_message, "Partial Content");
+    strcpy(http_response->content_type_hdr, "application/octet-stream");
+    break;
   case HTTP_NOT_FOUND:
     http_response->status_code = 404;
     strcpy(http_response->status_message, "Not Found");
@@ -185,13 +217,6 @@ void generate_http_error_response(int error_code,
     strcpy(http_response->status_message, "Internal Server Error");
     break;
   }
-}
-
-void generate_http_ok_response(struct HTTPResponse *http_response) {
-  http_response->status_code = 200;
-  strcpy(http_response->status_message, "OK");
-  // TODO: Add the content type based on the file extension
-  strcpy(http_response->content_type_hdr, "application/octet-stream");
 }
 
 /*  ---------------- util function ------------------------------*/
@@ -229,6 +254,14 @@ long construct_http_response_string(struct HTTPResponse *http_response,
     strcat(response_string, "\r\n");
   }
 
+  if (http_response->status_code == HTTP_PARTIAL_CONTENT) {
+    char content_range[64];
+    sprintf(content_range, "Content-Range: bytes %ld-%ld/%ld\r\n",
+            http_response->range_hdr.start, http_response->range_hdr.end,
+            http_response->range_hdr.total_length);
+    strcat(response_string, content_range);
+  }
+
   // End headers section
   strcat(response_string, "\r\n");
 
@@ -243,7 +276,8 @@ long construct_http_response_string(struct HTTPResponse *http_response,
 }
 
 struct HTTPRangeRequest *parse_http_range_request_hdr(char *range_hdr) {
-  struct HTTPRangeRequest *range_request = malloc(sizeof(struct HTTPRangeRequest));
+  struct HTTPRangeRequest *range_request =
+      malloc(sizeof(struct HTTPRangeRequest));
   char *range = malloc(strlen(range_hdr) * sizeof(char));
   strcpy(range, range_hdr);
   char *range_type = strtok(range, "=");
@@ -317,17 +351,18 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
   strcpy(http_request->payload, payload_body);
 
   // TODO: Maybe strtok_r can be used to make this function reentrant?
-  // Since strtok is not a reentrant function, we weren't able to parse the range
-  // header in the same loop. Hence, we parse it here
+  // Since strtok is not a reentrant function, we weren't able to parse the
+  // range header in the same loop. Hence, we parse it here
   if (strlen(http_request->range_hdr_raw) > 0) {
-    http_request->range_hdr = *parse_http_range_request_hdr(http_request->range_hdr_raw);
-    printf("Range: %ld - %ld\n", http_request->range_hdr.start, http_request->range_hdr.end);
+    http_request->range_hdr =
+        *parse_http_range_request_hdr(http_request->range_hdr_raw);
+    printf("Range: %ld - %ld\n", http_request->range_hdr.start,
+           http_request->range_hdr.end);
   }
 }
 
 int process_head_http_request(struct HTTPRequest *http_request,
                               struct HTTPResponse *http_response) {
-  int a;
   // Read the file length. Store it in content length. If file not found return
   // 404
   long file_length = get_file_length(http_request->uri);
@@ -368,6 +403,52 @@ int proccess_get_http_request(struct HTTPRequest *http_request,
   return HTTP_OK;
 }
 
+int process_get_http_range_request(struct HTTPRequest *http_request,
+                                   struct HTTPResponse *http_response) {
+
+  strcpy(http_response->protocol, http_request->protocol);
+
+  // Validate the range requests
+  if (http_request->range_hdr.start < 0 || http_request->range_hdr.end < 0) {
+    return HTTP_INTERNAL_ERROR;
+  }
+  if (http_request->range_hdr.start > http_request->range_hdr.end) {
+    return HTTP_INTERNAL_ERROR;
+  }
+
+  long file_length = get_file_length(http_request->uri);
+  if (file_length == FILE_NOT_FOUND) {
+    return HTTP_NOT_FOUND;
+  }
+
+  http_response->range_hdr.total_length = file_length;
+
+  long request_bytes_length =
+      http_request->range_hdr.end - http_request->range_hdr.start + 1;
+
+  // TODO: What do we do, if the range request is beyond the BUFFER_LENGTH
+  // allowed?
+  unsigned char *partial_file_content =
+      malloc(request_bytes_length * sizeof(char));
+
+  size_t bytes_read = get_file_content_range(
+      http_request->uri, partial_file_content, http_request->range_hdr.start,
+      request_bytes_length);
+
+  // Add a null terminator to the end of the file content
+  partial_file_content[bytes_read] = '\0';
+  // The contents of the file should be treated as binary and as such should be
+  // copied as is. Hence, we use memcpy instead of strcpy
+  memcpy(http_response->payload, partial_file_content, bytes_read);
+
+  // Set the "Content-Range" and "Content-Length" header
+  http_response->range_hdr.start = http_request->range_hdr.start;
+  http_response->range_hdr.end = http_request->range_hdr.end;
+  http_response->content_length_hdr = bytes_read;
+
+  return HTTP_PARTIAL_CONTENT;
+}
+
 void process_http_request(struct HTTPRequest *http_request,
                           struct HTTPResponse *http_response) {
   int response_code;
@@ -376,16 +457,18 @@ void process_http_request(struct HTTPRequest *http_request,
   if (strcasecmp(http_request->method, "HEAD") == 0) {
     response_code = process_head_http_request(http_request, http_response);
   } else if (strcasecmp(http_request->method, "GET") == 0) {
-    response_code = proccess_get_http_request(http_request, http_response);
+    if (strlen(http_request->range_hdr_raw) > 0) {
+      response_code =
+          process_get_http_range_request(http_request, http_response);
+    } else {
+      response_code = proccess_get_http_request(http_request, http_response);
+    }
+
   } else {
     response_code = HTTP_NOT_FOUND;
   }
 
-  if (response_code != HTTP_OK) {
-    generate_http_error_response(response_code, http_response);
-  } else {
-    generate_http_ok_response(http_response);
-  }
+  generate_http_response(response_code, http_response);
 
   return;
 }
