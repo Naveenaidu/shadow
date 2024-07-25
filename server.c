@@ -13,10 +13,14 @@
 // errors
 #define FILE_NOT_FOUND -2
 
+// HTTP Status code
+#define HTTP_OK 200
+#define HTTP_NOT_FOUND 404
+
 // todo: take this as an argument
 #define PORT 8082
 // #define BUFFER_SIZE 104857600 // 100 MiB
-# define BUFFER_SIZE 16106127360 // 15 GiB
+#define BUFFER_SIZE 16106127360 // 15 GiB
 
 // Header constansts
 #define HOST_HEADER "HOST"
@@ -58,8 +62,8 @@
 */
 struct HTTPRequest {
   // Method details
-  char method[30];    // "GET" or "POST"
-  char uri[200];      // "/index.html" things before '?' (used for GET request)
+  char method[30];   // "GET" or "POST"
+  char uri[200];     // "/index.html" things before '?' (used for GET request)
   char protocol[30]; // "HTTP/1.1"
 
   // Headers
@@ -91,6 +95,8 @@ struct HTTPResponseMetadata {
   long response_length;
 };
 
+/*  ---------------- util function ------------------------------*/
+
 void printHTTPRequest(struct HTTPRequest *request) {
   printf("-------------- HTTP Request -----------\n");
   printf("Method: %s\n", request->method);
@@ -101,7 +107,6 @@ void printHTTPRequest(struct HTTPRequest *request) {
   printf("Content-Type Header: %s\n", request->content_type_hdr);
   printf("Content-Length Header: %ld\n", request->content_length_hdr);
   printf("Payload: %s\n", request->payload);
-
 }
 
 void printHTTPResponse(struct HTTPResponse *http_response) {
@@ -114,8 +119,68 @@ void printHTTPResponse(struct HTTPResponse *http_response) {
   printf("Payload: %s\n", http_response->payload);
 }
 
-long construct_http_response_string(struct HTTPResponse *http_response, char *response_string ) {
-  
+long get_file_length(char *file_name) {
+  FILE *fp = fopen(file_name, "r");
+  if (fp == NULL) {
+    return FILE_NOT_FOUND;
+  }
+  int file_descriptor = fileno(fp);
+  if (file_descriptor < 0) {
+    perror("error getting file descriptor");
+    exit(EXIT_FAILURE);
+  }
+  // Get the file attributes
+  // This allows us to get the size of file without opening it
+  struct stat file_stat;
+  fstat(file_descriptor, &file_stat);
+
+  fclose(fp);
+  return file_stat.st_size;
+}
+
+size_t get_file_content(char *file_name, unsigned char *buffer,
+                        long file_size) {
+  FILE *fp = fopen(file_name, "rb");
+  if (fp == NULL) {
+    return FILE_NOT_FOUND;
+  }
+  size_t bytes_read = fread(buffer, 1, file_size, fp);
+  // The total bytes read should be same as the file size
+  if (bytes_read != file_size) {
+    perror("error reading file");
+    exit(EXIT_FAILURE);
+  }
+
+  fclose(fp);
+  return bytes_read;
+}
+
+void generate_http_error_response(int error_code,
+                                  struct HTTPResponse *http_response) {
+  switch (error_code) {
+  case HTTP_NOT_FOUND:
+    http_response->status_code = 404;
+    strcpy(http_response->status_message, "Not Found");
+    break;
+  default:
+    http_response->status_code = 500;
+    strcpy(http_response->status_message, "Internal Server Error");
+    break;
+  }
+}
+
+void generate_http_ok_response(struct HTTPResponse *http_response) {
+  http_response->status_code = 200;
+  strcpy(http_response->status_message, "OK");
+  // TODO: Add the content type based on the file extension
+  strcpy(http_response->content_type_hdr, "application/octet-stream");
+}
+
+/*  ---------------- util function ------------------------------*/
+
+long construct_http_response_string(struct HTTPResponse *http_response,
+                                    char *response_string) {
+
   if (response_string == NULL) {
     perror("Failed to allocate memory");
     exit(EXIT_FAILURE);
@@ -130,11 +195,11 @@ long construct_http_response_string(struct HTTPResponse *http_response, char *re
 
   // Add headers if they are not empty
 
-    char content_length[64];
-    sprintf(content_length, "Content-Length: %ld\r\n",
-            http_response->content_length_hdr);
-    strcat(response_string, content_length);
-  
+  char content_length[64];
+  sprintf(content_length, "Content-Length: %ld\r\n",
+          http_response->content_length_hdr);
+  strcat(response_string, content_length);
+
   if (strlen(http_response->accept_ranges_hdr) > 0) {
     strcat(response_string, "Accept-Ranges: ");
     strcat(response_string, http_response->accept_ranges_hdr);
@@ -149,15 +214,14 @@ long construct_http_response_string(struct HTTPResponse *http_response, char *re
   // End headers section
   strcat(response_string, "\r\n");
 
-  long counter = strlen(response_string);
+  long response_length = strlen(response_string);
 
   for (long i = 0; i < http_response->content_length_hdr; i++) {
-    response_string[counter] = (unsigned char)http_response->payload[i];
-    counter++;
+    response_string[response_length] = (unsigned char)http_response->payload[i];
+    response_length++;
   }
 
-
-  return counter;
+  return response_length;
 }
 
 // Parse the raw HTTP request and populate the HTTPRequest struct
@@ -218,64 +282,25 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
   strcpy(http_request->payload, payload_body);
 }
 
-long get_file_length(char *file_name) {
-  FILE *fp = fopen(file_name, "r");
-  if (fp == NULL) {
-    return FILE_NOT_FOUND;
-  }
-  int file_descriptor = fileno(fp);
-  if (file_descriptor < 0) {
-    perror("error getting file descriptor");
-    exit(EXIT_FAILURE);
-  }
-  // Get the file attributes
-  // This allows us to get the size of file without opening it
-  struct stat file_stat;
-  fstat(file_descriptor, &file_stat);
-
-  fclose(fp);
-  return file_stat.st_size;
-}
-
-size_t get_file_content(char *file_name, unsigned char *buffer, long file_size) {
-  FILE *fp = fopen(file_name, "rb");
-  if (fp == NULL) {
-    return FILE_NOT_FOUND;
-  }
-  size_t bytes_read = fread(buffer, 1, file_size, fp);
-  // The total bytes read should be same as the file size
-  if (bytes_read != file_size) {
-    perror("error reading file");
-    exit(EXIT_FAILURE);
-  }
-
-  fclose(fp);
-  return bytes_read;
-}
-
-void process_head_http_request(struct HTTPRequest *http_request,
-                               struct HTTPResponse *http_response) {
+int process_head_http_request(struct HTTPRequest *http_request,
+                              struct HTTPResponse *http_response) {
   int a;
   // Read the file length. Store it in content length. If file not found return
   // 404
   long file_length = get_file_length(http_request->uri);
   if (file_length == FILE_NOT_FOUND) {
-    http_response->status_code = 404;
-    strcpy(http_response->status_message, "Not Found");
-  } else {
-    http_response->content_length_hdr = file_length;
-    http_response->status_code = 200;
-    strcpy(http_response->status_message, "OK");
+    return HTTP_NOT_FOUND;
   }
-
+  http_response->content_length_hdr = file_length;
   strcpy(http_response->protocol, http_request->protocol);
   strcpy(http_response->accept_ranges_hdr, "bytes");
-  // TODO: Add the content type based on the file extension
   strcpy(http_response->content_type_hdr, "application/octet-stream");
+
+  return HTTP_OK;
 }
 
-void proccess_get_http_request(struct HTTPRequest *http_request,
-                               struct HTTPResponse *http_response) {
+int proccess_get_http_request(struct HTTPRequest *http_request,
+                              struct HTTPResponse *http_response) {
 
   strcpy(http_response->protocol, http_request->protocol);
 
@@ -283,43 +308,41 @@ void proccess_get_http_request(struct HTTPRequest *http_request,
   // 404
   long file_length = get_file_length(http_request->uri);
   if (file_length == FILE_NOT_FOUND) {
-    http_response->status_code = 404;
-    strcpy(http_response->status_message, "Not Found");
-    return;
-  } else {
-    http_response->content_length_hdr = file_length;
-    http_response->status_code = 200;
-    strcpy(http_response->status_message, "OK");
+    return HTTP_NOT_FOUND;
   }
 
-  
-  strcpy(http_response->content_type_hdr, "application/octet-stream");
+  http_response->content_length_hdr = file_length;
 
   // Read the file content and store it in the payload
   unsigned char *file_content = malloc(file_length * sizeof(char));
-  size_t bytes_read = get_file_content(http_request->uri, file_content, file_length);
-
+  size_t bytes_read =
+      get_file_content(http_request->uri, file_content, file_length);
+  // Add a null terminator to the end of the file content
   file_content[bytes_read] = '\0';
-
+  // The contents of the file should be treated as binary and as such should be
+  // copied as is. Hence, we use memcpy instead of strcpy
   memcpy(http_response->payload, file_content, bytes_read);
-
+  return HTTP_OK;
 }
 
 void process_http_request(struct HTTPRequest *http_request,
                           struct HTTPResponse *http_response) {
+  int response_code;
   // 1. Check the http method and process accordingly
   // 2. If GET, then fetch the file and send it back
   if (strcasecmp(http_request->method, "HEAD") == 0) {
-    process_head_http_request(http_request, http_response);
+    response_code = process_head_http_request(http_request, http_response);
   } else if (strcasecmp(http_request->method, "GET") == 0) {
-    proccess_get_http_request(http_request, http_response);
+    response_code = proccess_get_http_request(http_request, http_response);
   } else {
-    // send error response
+    response_code = HTTP_NOT_FOUND;
   }
 
-  // 1. The file name is present in the URI
-  // 2. Fetch the file using the file name
-  // 3. Add it to payload and send
+  if (response_code != HTTP_OK) {
+    generate_http_error_response(response_code, http_response);
+  } else {
+    generate_http_ok_response(http_response);
+  }
 
   return;
 }
@@ -327,7 +350,8 @@ void process_http_request(struct HTTPRequest *http_request,
 void send_http_request(int client_fd, struct HTTPResponse *http_response) {
   // Allocate a buffer for the response string
   char *response_string = malloc(BUFFER_SIZE); // Adjust size as needed
-  long total_response_bytes = construct_http_response_string(http_response, response_string);
+  long total_response_bytes =
+      construct_http_response_string(http_response, response_string);
   long bytes_sent = send(client_fd, response_string, total_response_bytes, 0);
 
   if (bytes_sent < 0) {
