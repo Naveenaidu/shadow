@@ -3,6 +3,12 @@
 shadow is a simple HTTP server for serving files, especially large files. The
 video below shows two clients making the requests to server to fetch a 2GB file.
 
+
+https://github.com/user-attachments/assets/3aae2468-63c8-4da4-91a3-b503f007e564
+
+
+
+
 ## Supported HTTP Methods
 
 It supports the following HTTP Methods
