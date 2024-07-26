@@ -70,15 +70,15 @@
 
 // Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests
 struct HTTPRangeRequest {
-  long start;
-  long end;
+  long long start;
+  long long end;
   char range_type[30];
 };
 
 struct HTTPRangeResponse {
-  long start;
-  long end;
-  long total_length;
+  long long start;
+  long long end;
+  long long total_length;
 };
 
 struct HTTPRequest {
@@ -91,7 +91,7 @@ struct HTTPRequest {
   char host_hdr[30];                 // "localhost:8082"
   char authorization_hdr[30];        // <secret>
   char content_type_hdr[30];         // "application/json"
-  long content_length_hdr;           // 38 (used for POST request)
+  long long content_length_hdr;      // 38 (used for POST request)
   char range_hdr_raw[30];            // "0-100" (used for range request)
   struct HTTPRangeRequest range_hdr; // 0-100 (used for range request)
 
@@ -107,7 +107,7 @@ struct HTTPResponse {
   // Headers
   char content_type_hdr[30];          // "application/json"
   char accept_ranges_hdr[30];         // "bytes"
-  long content_length_hdr;            // 38 (sent back in GET response)
+  long long content_length_hdr;       // 38 (sent back in GET response)
   struct HTTPRangeResponse range_hdr; // 0-100 (used for range request)
 
   // Payload
@@ -129,8 +129,8 @@ void printHTTPRequest(struct HTTPRequest *request) {
   printf("Host Header: %s\n", request->host_hdr);
   printf("Authorization Header: %s\n", request->authorization_hdr);
   printf("Content-Type Header: %s\n", request->content_type_hdr);
-  printf("Content-Length Header: %ld\n", request->content_length_hdr);
-  printf("Range: %ld - %ld\n", request->range_hdr.start,
+  printf("Content-Length Header: %lld\n", request->content_length_hdr);
+  printf("Range: %lld - %lld\n", request->range_hdr.start,
          request->range_hdr.end);
   printf("Payload: %s\n", request->payload);
 }
@@ -139,15 +139,15 @@ void printHTTPResponse(struct HTTPResponse *http_response) {
   printf("-------------- HTTP Response -----------\n");
   printf("%s %d %s\n", http_response->protocol, http_response->status_code,
          http_response->status_message);
-  printf("Content-Length: %ld\n", http_response->content_length_hdr);
+  printf("Content-Length: %lld\n", http_response->content_length_hdr);
   printf("Accept-Ranges: %s\n", http_response->accept_ranges_hdr);
   printf("Content-Type: %s\n", http_response->content_type_hdr);
-  printf("Content-Range: %ld-%ld/%ld\n", http_response->range_hdr.start,
+  printf("Content-Range: %lld-%lld/%lld\n", http_response->range_hdr.start,
          http_response->range_hdr.end, http_response->range_hdr.total_length);
   printf("Payload: %s\n", http_response->payload);
 }
 
-long get_file_length(char *file_name) {
+long long get_file_length(char *file_name) {
   FILE *fp = fopen(file_name, "r");
   if (fp == NULL) {
     return FILE_NOT_FOUND;
@@ -167,7 +167,7 @@ long get_file_length(char *file_name) {
 }
 
 size_t get_file_content(char *file_name, unsigned char *buffer,
-                        long file_size) {
+                        long long file_size) {
   FILE *fp = fopen(file_name, "rb");
   if (fp == NULL) {
     return FILE_NOT_FOUND;
@@ -184,14 +184,13 @@ size_t get_file_content(char *file_name, unsigned char *buffer,
 }
 
 size_t get_file_content_range(char *file_name, unsigned char *buffer,
-                              long start, long range_length) {
+                              long long start, long long range_length) {
   FILE *fp = fopen(file_name, "rb");
   if (fp == NULL) {
     return FILE_NOT_FOUND;
   }
   fseek(fp, start, SEEK_SET);
   size_t bytes_read = fread(buffer, 1, range_length, fp);
-
   // The total bytes read should be same as the file size
   fclose(fp);
   return bytes_read;
@@ -222,9 +221,9 @@ void generate_http_response(int code, struct HTTPResponse *http_response) {
 
 /*  ---------------- util function ------------------------------*/
 
-long construct_http_response_string(struct HTTPResponse *http_response,
-                                    struct HTTPRequest *http_request,
-                                    char *response_string) {
+long long construct_http_response_string(struct HTTPResponse *http_response,
+                                         struct HTTPRequest *http_request,
+                                         char *response_string) {
 
   if (response_string == NULL) {
     perror("Failed to allocate memory");
@@ -241,7 +240,7 @@ long construct_http_response_string(struct HTTPResponse *http_response,
   // Add headers if they are not empty
 
   char content_length[64];
-  sprintf(content_length, "Content-Length: %ld\r\n",
+  sprintf(content_length, "Content-Length: %lld\r\n",
           http_response->content_length_hdr);
   strcat(response_string, content_length);
 
@@ -258,7 +257,7 @@ long construct_http_response_string(struct HTTPResponse *http_response,
 
   if (http_response->status_code == HTTP_PARTIAL_CONTENT) {
     char content_range[64];
-    sprintf(content_range, "Content-Range: bytes %ld-%ld/%ld\r\n",
+    sprintf(content_range, "Content-Range: bytes %lld-%lld/%lld\r\n",
             http_response->range_hdr.start, http_response->range_hdr.end,
             http_response->range_hdr.total_length);
     strcat(response_string, content_range);
@@ -267,11 +266,11 @@ long construct_http_response_string(struct HTTPResponse *http_response,
   // End headers section
   strcat(response_string, "\r\n");
 
-  long response_length = strlen(response_string);
+  long long response_length = strlen(response_string);
 
   // Add the payload only when the method is GET
   if (strcasecmp(http_request->method, "GET") == 0)
-    for (long i = 0; i < http_response->content_length_hdr; i++) {
+    for (long long i = 0; i < http_response->content_length_hdr; i++) {
       response_string[response_length] =
           (unsigned char)http_response->payload[i];
       response_length++;
@@ -289,8 +288,8 @@ struct HTTPRangeRequest *parse_http_range_request_hdr(char *range_hdr) {
   char *range_start = strtok(NULL, "-");
   char *range_end = strtok(NULL, "");
 
-  range_request->start = atoi(range_start);
-  range_request->end = atoi(range_end);
+  range_request->start = atoll(range_start);
+  range_request->end = atoll(range_end);
   strcpy(range_request->range_type, range_type);
 
   return range_request;
@@ -361,7 +360,7 @@ void parse_http_request(char *buffer, struct HTTPRequest *http_request) {
   if (strlen(http_request->range_hdr_raw) > 0) {
     http_request->range_hdr =
         *parse_http_range_request_hdr(http_request->range_hdr_raw);
-    printf("Range: %ld - %ld\n", http_request->range_hdr.start,
+    printf("Range: %lld - %lld\n", http_request->range_hdr.start,
            http_request->range_hdr.end);
   }
 }
@@ -406,6 +405,8 @@ int proccess_get_http_request(struct HTTPRequest *http_request,
   // The contents of the file should be treated as binary and as such should be
   // copied as is. Hence, we use memcpy instead of strcpy
   memcpy(http_response->payload, file_content, bytes_read);
+
+  free(file_content);
   return HTTP_OK;
 }
 
@@ -452,6 +453,7 @@ int process_get_http_range_request(struct HTTPRequest *http_request,
   http_response->range_hdr.end = http_request->range_hdr.end;
   http_response->content_length_hdr = bytes_read;
 
+  free(partial_file_content);
   return HTTP_PARTIAL_CONTENT;
 }
 
@@ -491,6 +493,8 @@ void send_http_request(int client_fd, struct HTTPResponse *http_response,
     perror("error sending data to client");
     exit(EXIT_FAILURE);
   }
+
+  free(response_string);
 }
 
 // Handle the client request
@@ -606,7 +610,6 @@ int main(int argc, char *argv[]) {
       close(client_fd);
     }
     pthread_detach(thread_id);
-
   }
 
   close(client_fd);
