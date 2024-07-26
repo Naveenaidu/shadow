@@ -6,6 +6,15 @@ video below shows two clients making the requests to server to fetch a 2GB file.
 
 https://github.com/user-attachments/assets/3aae2468-63c8-4da4-91a3-b503f007e564
 
+Another video below shows fetching a 11.5 GB file. The time taken to fetch that file
+in chunks of 200 MB is around 2 minutes (its very fast, beacause it was tested locally :P).
+The video also shows that the baseline memory consumption of the process is around 400 MB \o/
+
+
+
+https://github.com/user-attachments/assets/153e620c-cc55-44c2-a0ed-e7469409282e
+
+
 
 
 
