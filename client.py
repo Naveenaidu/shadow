@@ -20,21 +20,12 @@ def fetch_in_chunks(url, chunk_size_kib, original_file, output_file):
     # Open the output file in binary write mode
     with open(output_file, 'wb') as f:
         for start in range(0, file_size, chunk_size):
-
-            # print(f"start, minus {start} {start + chunk_size - 1}")
-            # print(f"chunk_size {chunk_size}")
-            # print(f"file_size {file_size - 1}")
-
-
-
             end = min(start + chunk_size - 1, file_size - 1)
-
-            # print(f"end {end}")
 
             headers = {
                 "Range": f"bytes={start}-{end}"
             }
-            # print(f"Fetching bytes from {start} to {end}")
+            
             chunk_response = requests.get(url, headers=headers, stream=True)
             if chunk_response.status_code not in [200, 206]:
                 raise Exception(f"Failed to fetch chunk: {chunk_response.status_code}")
