@@ -371,11 +371,12 @@ int process_head_http_request(struct HTTPRequest *http_request,
   // Read the file length. Store it in content length. If file not found return
   // 404
   long file_length = get_file_length(http_request->uri);
+  strcpy(http_response->protocol, http_request->protocol);
   if (file_length == FILE_NOT_FOUND) {
     return HTTP_NOT_FOUND;
   }
   http_response->content_length_hdr = file_length;
-  strcpy(http_response->protocol, http_request->protocol);
+
   strcpy(http_response->accept_ranges_hdr, "bytes");
   strcpy(http_response->content_type_hdr, "application/octet-stream");
 
