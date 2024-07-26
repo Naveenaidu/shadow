@@ -91,3 +91,9 @@ curl http://localhost:8082/home/theprophet/Pictures/Screenshots/test.png  -H "Au
 
 cmp test.png upload_test_1.png
 ```
+
+#### Running client
+
+```
+python client.py http://localhost:8082/tmp/upload_test /tmp/upload_test /tmp/upload_test_2 102400
+```

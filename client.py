@@ -1,9 +1,11 @@
 import requests
 from tqdm import tqdm
 import filecmp
+import argparse
 
+def fetch_in_chunks(url, chunk_size_kib, original_file, output_file):
+    chunk_size = chunk_size_kib * 1024  # Convert KiB to bytes
 
-def fetch_in_chunks(url, chunk_size=100 * 1024 * 1024, output_file='output_file', original_file='original_file'):
     # Send a HEAD request to get the total size of the file
     response = requests.head(url)
     if response.status_code != 200:
@@ -42,6 +44,13 @@ def fetch_in_chunks(url, chunk_size=100 * 1024 * 1024, output_file='output_file'
     else:
         print("The downloaded file does not match the original file.")
 
-# Example usage
-url = 'http://localhost:8082/tmp/upload_test'
-fetch_in_chunks(url, output_file='/tmp/upload_test_1', original_file='/tmp/upload_test')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Download a file in chunks using HTTP Range requests.")
+    parser.add_argument("url", help="The URL of the file to download")
+    parser.add_argument("original_file", help="The path to the original file for comparison")
+    parser.add_argument("output_file", help="The path to save the downloaded file")
+    parser.add_argument("chunk_size_kib", type=int, help="The chunk size in KiB, eg: 102400 KiB (100 MiB)")
+
+    args = parser.parse_args()
+
+    fetch_in_chunks(args.url, args.chunk_size_kib, args.original_file, args.output_file)

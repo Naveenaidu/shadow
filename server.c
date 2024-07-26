@@ -1,6 +1,7 @@
 #include <asm-generic/socket.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,9 +25,9 @@
 #define BUFFER_SIZE 309715200 // 300 MiB
 
 // NOTE: choose appropriate buffer size, If the amount of data you want to
-// receive/send in HTTP request-response cycle is greater than 200 MiB, then increase.
-// #define BUFFER_SIZE 104857600 // 100 MiB 
-// #define BUFFER_SIZE 16106127360 // 15 GiB
+// receive/send in HTTP request-response cycle is greater than 200 MiB, then
+// increase. #define BUFFER_SIZE 104857600 // 100 MiB #define BUFFER_SIZE
+// 16106127360 // 15 GiB
 
 // Header constansts
 #define HOST_HEADER "HOST"
@@ -221,7 +222,8 @@ void generate_http_response(int code, struct HTTPResponse *http_response) {
 
 /*  ---------------- util function ------------------------------*/
 
-long construct_http_response_string(struct HTTPResponse *http_response, struct HTTPRequest *http_request,
+long construct_http_response_string(struct HTTPResponse *http_response,
+                                    struct HTTPRequest *http_request,
                                     char *response_string) {
 
   if (response_string == NULL) {
@@ -270,10 +272,10 @@ long construct_http_response_string(struct HTTPResponse *http_response, struct H
   // Add the payload only when the method is GET
   if (strcasecmp(http_request->method, "GET") == 0)
     for (long i = 0; i < http_response->content_length_hdr; i++) {
-    response_string[response_length] = (unsigned char)http_response->payload[i];
-    response_length++;
-  }
-  
+      response_string[response_length] =
+          (unsigned char)http_response->payload[i];
+      response_length++;
+    }
 
   return response_length;
 }
@@ -476,11 +478,12 @@ void process_http_request(struct HTTPRequest *http_request,
   return;
 }
 
-void send_http_request(int client_fd, struct HTTPResponse *http_response, struct HTTPRequest *http_request) {
+void send_http_request(int client_fd, struct HTTPResponse *http_response,
+                       struct HTTPRequest *http_request) {
   // Allocate a buffer for the response string
   char *response_string = malloc(BUFFER_SIZE); // Adjust size as needed
-  long total_response_bytes =
-      construct_http_response_string(http_response, http_request, response_string);
+  long total_response_bytes = construct_http_response_string(
+      http_response, http_request, response_string);
   long bytes_sent = send(client_fd, response_string, total_response_bytes, 0);
 
   if (bytes_sent < 0) {
@@ -490,7 +493,9 @@ void send_http_request(int client_fd, struct HTTPResponse *http_response, struct
 }
 
 // Handle the client request
-void handle_client_request(int client_fd) {
+void *handle_client_request(void *arg) {
+  int client_fd = *((int *)arg);
+
   char *buffer = (char *)malloc(BUFFER_SIZE * sizeof(char));
   int bytes_recvd;
 
@@ -531,7 +536,12 @@ void handle_client_request(int client_fd) {
   printf("\nResponse sent\n");
   printf("-------------------------------\n\n");
 
-  return;
+  close(client_fd);
+  free(arg);
+  free(buffer);
+  free(http_request);
+  free(http_response);
+  return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -577,14 +587,25 @@ int main(int argc, char *argv[]) {
     // accept client connection
     client_fd =
         accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+    int *client_fd_ptr = malloc(sizeof(int));
+    *client_fd_ptr = client_fd;
 
     if (client_fd < 0) {
       perror("bind failed");
       exit(EXIT_FAILURE);
     }
 
-    // process the request
-    handle_client_request(client_fd);
+    // create a new thread to handle client request
+    // TODO: Use thread pool, to avoid creating new thread for each request
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, handle_client_request,
+                       client_fd_ptr) != 0) {
+      perror("error creating thread");
+      free(client_fd_ptr);
+      close(client_fd);
+    }
+    pthread_detach(thread_id);
+
   }
 
   close(client_fd);
